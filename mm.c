@@ -245,8 +245,8 @@ static void *coalesce(void *bp)
   //CASE 3 : Only prev unallocated
   else if (!prev_alloc && next_alloc){
     size += GET_SIZE(HDRP(PREV_BLKP(bp)));
-    PUT(HDRP(bp), PACK(size,0));
-    PUT(FTRP(PREV_BLKP(bp)), PACK(size,0));
+    PUT(FTRP(bp), PACK(size,0));
+    PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
     bp = PREV_BLKP(bp);
   }
 
