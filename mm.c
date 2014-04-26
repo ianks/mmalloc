@@ -140,7 +140,7 @@ int mm_init(void)
 
   // Create empty heap
   if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1){
-    return -1
+    return -1;
   }
   //alignment padding
   PUT(heap_listp, 0);
@@ -153,7 +153,7 @@ int mm_init(void)
   heap_listp += (2*WSIZE);
 
   //extend empty heap with free block of CHUNKSIZE byes
-  if (extend_heap(CHUNCKSIZE/WSIZE) == NULL){
+  if (extend_heap(CHUNKSIZE/WSIZE) == NULL){
     return -1;
   }
   return 0;
@@ -236,7 +236,7 @@ static void *coalesce(void *bp)
   else if (!prev_alloc && next_alloc){
     size += GET_SIZE(HDRP(PREV_BLKP(bp)));
     PUT(HDRP(bp), PACK(size,0));
-    PUT(FTRP(PREV_BLKP(bp), PACK(size,0));
+    PUT(FTRP(PREV_BLKP(bp)), PACK(size,0));
     bp = PREV_BLKP(bp);
   }
 
@@ -274,7 +274,7 @@ void *mm_malloc(size_t size)
   }
   else{
     //round size up to nearest mult of DSIZE then add DSIZE
-    asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE)
+    asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
   }
 
   //search the free list for a fit
