@@ -142,6 +142,7 @@ int mm_init(void)
   if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1){
     return -1;
   }
+
   //alignment padding
   PUT(heap_listp, 0);
   // prologue header
@@ -171,7 +172,7 @@ static void *extend_heap(size_t words)
   //Allocate even number of words to maintain alignment
   size = (words % 2) ? (words+1) * WSIZE : words * WSIZE;
 
-  if ((long)(bp = mem_sbrk(size)) == -1){
+  if ((void*)(bp = mem_sbrk(size)) == (void*) -1){
     return NULL;
   }
 
@@ -297,11 +298,9 @@ void *mm_malloc(size_t size)
   if ((bp = extend_heap(extendsize/WSIZE)) == NULL){
     return NULL;
   }
+
   place(bp, asize);
   return bp;
-
-
-
 
 }
 
