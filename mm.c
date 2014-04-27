@@ -120,6 +120,12 @@ static inline void* PREV_BLKP(void *bp){
 // Global Variables
 //
 
+struct CLNode {
+  struct CLNode *next;
+  struct CLNode *prev;
+};
+
+
 static char *heap_listp;  /* pointer to first block */
 
 //
@@ -131,6 +137,16 @@ static void *find_fit(size_t asize);
 static void *coalesce(void *bp);
 static void printblock(void *bp);
 static void checkblock(void *bp);
+
+//
+// Circular list routines
+//
+
+void CL_init(struct CLNode *root);
+void CL_append(struct CLNode *after, struct CLNode *newguy);
+void CL_unlink(struct CLNode *ptr);
+void CL_print(struct CLNode *root);
+
 
 //
 // mm_init - Initialize the memory manager
@@ -418,3 +434,59 @@ static void checkblock(void *bp)
   }
 }
 
+
+
+//
+// Initialize the root of a circular list.
+// This has the next & prev pointing to the
+// root itself.
+//
+void CL_init(struct CLNode *root)
+{
+  root -> next = root;
+  root -> prev = root;
+}
+
+//
+// Add something after "after" in the list. Usually,
+// "after" will be the freelist struct
+//
+void CL_append(struct CLNode *after, struct CLNode *newguy)
+{
+  newguy -> next = after -> next;
+  newguy -> prev = after;
+  after -> next = newguy;
+  newguy -> next -> prev = newguy;
+}
+
+//
+// Unlink the element at "ptr". Ptr should NEVER be the
+// root / freelist head (the code will still work, but
+// you'll have lost all access to the other elements)
+//
+void CL_unlink(struct CLNode *ptr)
+{
+  ptr -> prev -> next = ptr -> next;
+  ptr -> next -> prev = ptr -> prev;
+  ptr -> next = NULL; // be tidy
+  ptr -> prev = NULL; // be tidy
+}
+
+void CL_print(struct CLNode *root)
+{
+  struct CLNode *ptr;
+  const char *sep = "";
+  int count = 0;
+
+  printf("FreeList @ %p: ", root);
+  //
+  // Note the iteration pattern --- you start with the "next"
+  // after the root, and then end when you're back at the root.
+  //
+  for ( ptr = root -> next; ptr != root; ptr = ptr -> next) {
+      count++;
+      printf("%s%p", sep, ptr);
+      sep = ", ";
+    }
+  printf(" #%d nodes\n", count);
+}
