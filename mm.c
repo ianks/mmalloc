@@ -125,6 +125,9 @@ struct CLNode {
   struct CLNode *prev;
 };
 
+struct CLNode Freelist;
+struct CLNode *free_ptr;
+
 
 static char *heap_listp;  /* pointer to first block */
 
@@ -153,6 +156,9 @@ void CL_print(struct CLNode *root);
 //
 int mm_init(void)
 {
+  // init free list
+  CL_init(&Freelist);
+  free_ptr = &FreeList;
 
   // Create empty heap
   if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1){
@@ -173,6 +179,9 @@ int mm_init(void)
   if (extend_heap(CHUNKSIZE/WSIZE) == NULL){
     return -1;
   }
+
+  //malloc root pointer -
+
   return 0;
 }
 
@@ -184,6 +193,7 @@ static void *extend_heap(size_t words)
 {
   char *bp;
   size_t size;
+  struct CLNode newNode;
 
   //Allocate even number of words to maintain alignment
   size = (words % 2) ? (words+1) * WSIZE : words * WSIZE;
@@ -196,6 +206,10 @@ static void *extend_heap(size_t words)
   //free block header
   PUT(HDRP(bp), PACK(size,0));
   //free block footer
+
+  PUT(HDRP(bp)+WSIZE, newNode);
+  CL_append(free_ptr, &newNode);
+
   PUT(FTRP(bp), PACK(size,0));
   //new epilogue header
   PUT(HDRP(NEXT_BLKP(bp)), PACK(0,1));
