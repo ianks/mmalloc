@@ -58,7 +58,7 @@ team_t team = {
 #define WSIZE       4       /* word size (bytes) */
 #define DSIZE       8       /* doubleword size (bytes) */
 #define CHUNKSIZE  (1<<12)  /* initial heap size (bytes) */
-#define OVERHEAD    8       /* overhead of header and footer (bytes) */
+#define OVERHEAD    16       /* overhead of header and footer (bytes) */
 
 static inline int MAX(int x, int y) {
   return x > y ? x : y;
@@ -69,8 +69,10 @@ static inline int MAX(int x, int y) {
 //
 //
 struct CLNode {
+  size_t size;
   struct CLNode *next;
   struct CLNode *prev;
+  int i; //align
 };
 
 //
@@ -207,25 +209,17 @@ static void checkblock(void *bp);
 int mm_init(void)
 {
 
+  struct CLNode *ptr;
+  prt->size = 1;
+
+
   // Create empty heap
-  if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1){
+  if ((ptr = mem_sbrk(4*WSIZE)) == (void *)-1){
     return -1;
   }
 
-  //alignment padding
-  PUT(heap_listp, 0);
-  // prologue header
-  PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));
-  //prologue footer
-  PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
-  //epilogue header
-  PUT(heap_listp + (3*WSIZE), PACK(0, 1));
-  // root node
-  CL_init(&root);
+  CL_init(&ptr);
 
-  heap_listp += (4*WSIZE);
-
-  //extend empty heap with free block of CHUNKSIZE byes
   if (extend_heap(CHUNKSIZE/WSIZE) == NULL){
     return -1;
   }
@@ -270,7 +264,17 @@ static void *extend_heap(size_t words)
 static void *find_fit(size_t asize)
 {
   // first fit search
-  void *bp;
+  struct CLNode *p;
+
+  for (p = (struct CLNode *)mem_heap_lo()->next;
+    p != mem_heap_lo() && (p-size < asize);
+    p = p->next){
+
+    if (p != mem_heap_lo())
+      return p;
+    else
+      return NULL;
+  }
 
   for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)){
     if ( !GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
@@ -340,41 +344,24 @@ static void *coalesce(void *bp)
 //
 void *mm_malloc(size_t size)
 {
-  //adjusted block size
-  size_t asize;
-  //ammount to extend heap if the new block doesnt fit
-  size_t extendsize;
-  char *bp;
 
-  //ignore spurious requests
-  if (size == 0){
-    return NULL;
+  int overall_size = size + OVERHEAD;
+
+  struct CLNode *block_ptr = find_fit(overall_size);
+
+  if (block_ptr == NULL){
+    block_ptr = mem_sbrk(overall_size);
+
+    if ((long)p == -1)
+      return NULL;
+    else{
+
+    }
   }
 
-  //adjust block size to include overhead and alignment reqs
-  if (size <= DSIZE){
-    asize = 2*DSIZE;
+  else {
+    block_ptr->size = 1;
   }
-  else{
-    //round size up to nearest mult of DSIZE then add DSIZE
-    asize = DSIZE * ((size + (DSIZE) + (DSIZE-1)) / DSIZE);
-  }
-
-  //search the free list for a fit
-  if ((bp = find_fit(asize)) != NULL){
-    place(bp, asize);
-    return bp;
-  }
-
-  // No fit found. Get more memory and place the block
-  extendsize =  MAX(asize, CHUNKSIZE);
-  if ((bp = extend_heap(extendsize/WSIZE)) == NULL){
-    return NULL;
-  }
-
-  place(bp, asize);
-  return bp;
-
 }
 
 //
