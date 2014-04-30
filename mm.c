@@ -64,6 +64,71 @@ static inline int MAX(int x, int y) {
   return x > y ? x : y;
 }
 
+/////////////////////////////////////////////////////////////////////////////
+// STRUCT
+//
+//
+struct CLNode {
+  struct CLNode *next;
+  struct CLNode *prev;
+};
+
+//
+// Initialize the root of a circular list.
+// This has the next & prev pointing to the
+// root itself.
+//
+void CL_init(struct CLNode *root)
+{
+  root -> next = root;
+  root -> prev = root;
+}
+
+//
+// Add something after "after" in the list. Usually,
+// "after" will be the freelist struct
+//
+void CL_append(struct CLNode *after, struct CLNode *newguy)
+{
+  newguy -> next = after -> next;
+  newguy -> prev = after;
+  after -> next = newguy;
+  newguy -> next -> prev = newguy;
+}
+
+//
+// Unlink the element at "ptr". Ptr should NEVER be the
+// root / freelist head (the code will still work, but
+// you'll have lost all access to the other elements)
+//
+void CL_unlink(struct CLNode *ptr)
+{
+  ptr -> prev -> next = ptr -> next;
+  ptr -> next -> prev = ptr -> prev;
+  ptr -> next = NULL; // be tidy
+  ptr -> prev = NULL; // be tidy
+}
+
+void CL_print(struct CLNode *root)
+{
+  struct CLNode *ptr;
+  const char *sep = "";
+  int count = 0;
+
+  printf("FreeList @ %p: ", root);
+  //
+  // Note the iteration pattern --- you start with the "next"
+  // after the root, and then end when you're back at the root.
+  //
+  for ( ptr = root -> next; ptr != root; ptr = ptr -> next) {
+      count++;
+      printf("%s%p", sep, ptr);
+      sep = ", ";
+    }
+  printf(" #%d nodes\n", count);
+}
+
+
 //
 // Pack a size and allocated bit into a word
 // We mask of the "alloc" field to insure only
@@ -120,7 +185,11 @@ static inline void* PREV_BLKP(void *bp){
 // Global Variables
 //
 
+struct CLNode root;
+
 static char *heap_listp;  /* pointer to first block */
+struct CLNode *root_ptr = &root;
+struct CLNode *cursor;
 
 //
 // function prototypes for internal helper routines
@@ -151,7 +220,10 @@ int mm_init(void)
   PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
   //epilogue header
   PUT(heap_listp + (3*WSIZE), PACK(0, 1));
-  heap_listp += (2*WSIZE);
+  // root node
+  CL_init(&root);
+
+  heap_listp += (4*WSIZE);
 
   //extend empty heap with free block of CHUNKSIZE byes
   if (extend_heap(CHUNKSIZE/WSIZE) == NULL){
@@ -168,6 +240,7 @@ static void *extend_heap(size_t words)
 {
   char *bp;
   size_t size;
+  struct CLNode new_node;
 
   //Allocate even number of words to maintain alignment
   size = (words % 2) ? (words+1) * WSIZE : words * WSIZE;
