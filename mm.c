@@ -120,6 +120,16 @@ static inline void* PREV_BLKP(void *bp){
 // Global Variables
 //
 
+struct CLNode {
+  struct CLNode *next;
+  struct CLNode *prev;
+};
+
+struct CLNode FreeList;
+struct CLNode *free_ptr;
+struct CLNode *cursor;
+
+
 static char *heap_listp;  /* pointer to first block */
 
 //
@@ -133,10 +143,24 @@ static void printblock(void *bp);
 static void checkblock(void *bp);
 
 //
+// Circular list routines
+//
+
+void CL_init(struct CLNode *root);
+void CL_append(struct CLNode *after, struct CLNode *newguy);
+void CL_unlink(struct CLNode *ptr);
+void CL_print(struct CLNode *root);
+
+
+//
 // mm_init - Initialize the memory manager
 //
 int mm_init(void)
 {
+  struct CLNode new_node;
+  // init free list
+  CL_init(&FreeList);
+  free_ptr = &FreeList;
 
   // Create empty heap
   if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1){
@@ -151,12 +175,19 @@ int mm_init(void)
   PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
   //epilogue header
   PUT(heap_listp + (3*WSIZE), PACK(0, 1));
-  heap_listp += (2*WSIZE);
+  // CLNode
+  PUT(heap_listp + (4*WSIZE), &new_node);
+  CL_append(free_ptr, &new_node);
+
+  heap_listp += (4*WSIZE);
 
   //extend empty heap with free block of CHUNKSIZE byes
   if (extend_heap(CHUNKSIZE/WSIZE) == NULL){
     return -1;
   }
+
+  //malloc root pointer -
+
   return 0;
 }
 
@@ -168,6 +199,7 @@ static void *extend_heap(size_t words)
 {
   char *bp;
   size_t size;
+  struct CLNode new_node;
 
   //Allocate even number of words to maintain alignment
   size = (words % 2) ? (words+1) * WSIZE : words * WSIZE;
@@ -180,9 +212,14 @@ static void *extend_heap(size_t words)
   //free block header
   PUT(HDRP(bp), PACK(size,0));
   //free block footer
+
   PUT(FTRP(bp), PACK(size,0));
   //new epilogue header
   PUT(HDRP(NEXT_BLKP(bp)), PACK(0,1));
+
+  PUT(HDRP(bp)+WSIZE, &new_node);
+  CL_append(free_ptr, &new_node);
+
 
   //Coalesce if previous block was free
   return coalesce(bp);
@@ -197,11 +234,10 @@ static void *extend_heap(size_t words)
 static void *find_fit(size_t asize)
 {
   // first fit search
-  void *bp;
 
-  for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)){
-    if ( !GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
-        return bp;
+  for (cursor = free_ptr; GET_SIZE(HDRP(cursor - WSIZE)) > 0; cursor = cursor->next){
+    if ( !GET_ALLOC(HDRP(cursor - WSIZE)) && (asize <= GET_SIZE(HDRP(cursor - WSIZE)))) {
+        return cursor - WSIZE;
     }
   }
   //no fit
@@ -213,8 +249,11 @@ static void *find_fit(size_t asize)
 //
 void mm_free(void *bp)
 {
-
   size_t size = GET_SIZE(HDRP(bp));
+
+  struct CLNode newNode;
+  PUT(HDRP(bp)+WSIZE, &newNode);
+  CL_append(free_ptr, &newNode);
 
   PUT(HDRP(bp), PACK(size,0));
   PUT(FTRP(bp), PACK(size,0));
@@ -315,15 +354,27 @@ static void place(void *bp, size_t asize)
 {
   size_t csize = GET_SIZE(HDRP(bp));
 
+  struct CLNode new_node;
+
   if ((csize - asize) >= (2*DSIZE)){
     PUT(HDRP(bp), PACK(asize, 1));
     PUT(FTRP(bp), PACK(asize, 1));
+    struct CLNode *ptr = cursor;
+    CL_unlink(ptr);
+    // delete(*ptr);
+    cursor = cursor->next;
+
     bp = NEXT_BLKP(bp);
+
+    PUT(HDRP(bp)+WSIZE, &new_node);
+    CL_append(cursor, &new_node);
     PUT(HDRP(bp), PACK(csize - asize, 0));
     PUT(FTRP(bp), PACK(csize - asize, 0));
   }
 
   else{
+    PUT(HDRP(bp)+WSIZE, &new_node);
+    CL_append(cursor, &new_node);
     PUT(HDRP(bp), PACK(csize,1));
     PUT(FTRP(bp), PACK(csize,1));
   }
@@ -418,3 +469,59 @@ static void checkblock(void *bp)
   }
 }
 
+
+
+//
+// Initialize the root of a circular list.
+// This has the next & prev pointing to the
+// root itself.
+//
+void CL_init(struct CLNode *root)
+{
+  root -> next = root;
+  root -> prev = root;
+}
+
+//
+// Add something after "after" in the list. Usually,
+// "after" will be the freelist struct
+//
+void CL_append(struct CLNode *after, struct CLNode *newguy)
+{
+  newguy -> next = after -> next;
+  newguy -> prev = after;
+  after -> next = newguy;
+  newguy -> next -> prev = newguy;
+}
+
+//
+// Unlink the element at "ptr". Ptr should NEVER be the
+// root / freelist head (the code will still work, but
+// you'll have lost all access to the other elements)
+//
+void CL_unlink(struct CLNode *ptr)
+{
+  ptr -> prev -> next = ptr -> next;
+  ptr -> next -> prev = ptr -> prev;
+  ptr -> next = NULL; // be tidy
+  ptr -> prev = NULL; // be tidy
+}
+
+void CL_print(struct CLNode *root)
+{
+  struct CLNode *ptr;
+  const char *sep = "";
+  int count = 0;
+
+  printf("FreeList @ %p: ", root);
+  //
+  // Note the iteration pattern --- you start with the "next"
+  // after the root, and then end when you're back at the root.
+  //
+  for ( ptr = root -> next; ptr != root; ptr = ptr -> next) {
+      count++;
+      printf("%s%p", sep, ptr);
+      sep = ", ";
+    }
+  printf(" #%d nodes\n", count);
+}
