@@ -61,7 +61,7 @@ team_t team = {
 #define OVERHEAD    8       /* overhead of header and footer (bytes) */
 
 #define NEXT_PTR(bp) *((void**) bp)
-#define SET_PTR(bp, val) ((*(void **) bp = val))
+#define SET_PTR(bp, val) ((*(void **) bp) = val)
 typedef void * FL_Pointer;
 
 static inline int MAX(int x, int y) {
@@ -214,11 +214,8 @@ static void *extend_heap(size_t words)
   PUT(FTRP(bp), PACK(size,0));
   // end of list
   add_to_free_list(bp);
-  add_to_free_list(HDRP(NEXT_BLKP(bp)) + WSIZE);
   //new epilogue header
   PUT(HDRP(NEXT_BLKP(bp)), PACK(0,1));
-
-
   //Coalesce if previous block was free
   return coalesce(bp);
 }
@@ -272,18 +269,27 @@ static void *coalesce(void *bp)
 
   //CASE 2 : Only next free
   else if (prev_alloc && !next_alloc) {
+    add_to_free_list(bp);
+    unlink_node(bp);
     size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
     PUT(HDRP(bp), PACK(size,0));
     PUT(FTRP(bp), PACK(size,0));
-    /*unlink_node(*bp);*/
   }
 
   //CASE 3 : Only prev free
   else if (!prev_alloc && next_alloc){
     size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+    add_to_free_list(PREV_BLKP(bp));
+    unlink_node(PREV_BLKP(bp));
     PUT(FTRP(bp), PACK(size,0));
     PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
     bp = PREV_BLKP(bp);
+    void *fp = FREEPTR(bp);
+
+    /*for (cursor = free_list; NEXT_PTR(cursor) != 0 && NEXT_PTR(cursor) != bp; cursor = NEXT_PTR(cursor)){*/
+    
+    //unlink_node(fp);
+
   }
 
   //CASE 4 : both neighbors unallocated
