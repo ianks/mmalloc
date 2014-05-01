@@ -133,7 +133,7 @@ static inline void add_to_free_list(void *bp) {
 }
 
 inline void unlink_node(void *bp){
-  void *cursor = free_list;
+  void *cursor;
 
   if (free_list == bp){
     free_list = (void*) bp;
@@ -229,11 +229,14 @@ static void *extend_heap(size_t words)
 static void *find_fit(size_t asize)
 {
   // first fit search
-  void *bp;
+  void *cursor;
 
-  for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)){
-    if ( !GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))) {
-        return bp;
+  /*printf("PAYLOAD Size: %d", asize);*/
+  /*printf("MEMORRY Size: %d", GET_SIZE(HDRP(cursor)));*/
+
+  for (cursor = free_list; NEXT_PTR(cursor) != NULL; cursor = NEXT_PTR(cursor)){
+    if ( (asize <= GET_SIZE(HDRP(cursor)))) {
+        return cursor;
     }
   }
   //no fit
@@ -264,13 +267,14 @@ static void *coalesce(void *bp)
 
   //CASE 1 : Both neighbors are allocated
   if (prev_alloc && next_alloc) {
+    add_to_free_list(bp);
     return bp;
   }
 
   //CASE 2 : Only next free
   else if (prev_alloc && !next_alloc) {
+    unlink_node(NEXT_BLKP(bp));
     add_to_free_list(bp);
-    unlink_node(bp);
     size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
     PUT(HDRP(bp), PACK(size,0));
     PUT(FTRP(bp), PACK(size,0));
@@ -285,8 +289,6 @@ static void *coalesce(void *bp)
     PUT(FTRP(bp), PACK(size,0));
     PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
     bp = PREV_BLKP(bp);
-    void *fp = FREEPTR(bp);
-
   }
 
   //CASE 4 : both neighbors unallocated
@@ -294,8 +296,8 @@ static void *coalesce(void *bp)
     size += GET_SIZE(HDRP(PREV_BLKP(bp)))
           + GET_SIZE(FTRP(NEXT_BLKP(bp)));
 
+    unlink_node(NEXT_BLKP(bp));
     add_to_free_list(PREV_BLKP(bp));
-    unlink_node(PREV_BLKP(bp));
 
     PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
     PUT(FTRP(NEXT_BLKP(bp)), PACK(size,0));
