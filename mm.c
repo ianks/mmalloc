@@ -55,14 +55,15 @@ team_t team = {
 // make debugging code easier.
 //
 /////////////////////////////////////////////////////////////////////////////
+typedef void * FL_Pointer;
 #define WSIZE       4       /* word size (bytes) */
 #define DSIZE       8       /* doubleword size (bytes) */
 #define CHUNKSIZE  (1<<12)  /* initial heap size (bytes) */
 #define OVERHEAD    8       /* overhead of header and footer (bytes) */
 
 #define NEXT_PTR(bp) *((void**) bp)
-#define SET_PTR(bp, val) ((*(void **) bp) = val)
-typedef void * FL_Pointer;
+#define SET_PTR(bp, val) ((*(FL_Pointer*)(bp)) = (val) )
+#define GETPTR(x) ( *(FL_Pointer *) (x) )
 
 static inline int MAX(int x, int y) {
   return x > y ? x : y;
@@ -126,20 +127,26 @@ static inline void* PREV_BLKP(void *bp){
 FL_Pointer free_list = NULL;
 
 static inline void add_to_free_list(void *bp) {
-  FL_Pointer *payload = (FL_Pointer *) bp;
-  *payload = free_list;
+  SET_PTR(bp, free_list);
   free_list = bp;
 }
 
 inline void unlink_node(void *bp){
-  void *cursor;
 
   if (free_list == bp){
-    free_list = (void*) bp;
+    //unlink first thing on list
+    free_list = GETPTR(bp);
   }else {
-    for (cursor = free_list; NEXT_PTR(cursor) != 0 && NEXT_PTR(cursor) != bp; cursor = NEXT_PTR(cursor)){
-      while(cursor != 0)
-        SET_PTR(cursor, NEXT_PTR(bp));
+    //unlink
+    FL_Pointer cursor;
+    for (cursor = free_list; GETPTR(cursor) != NULL && GETPTR(cursor) != bp; cursor = GETPTR(cursor)); 
+    if( cursor == NULL )
+    {
+      printf("Item not in list");
+    }
+    else{
+      //assert( GETPTR(cursor) == bp);
+      SET_PTR(cursor, GETPTR(bp));
     }
   }
 }
@@ -176,13 +183,13 @@ int mm_init(void)
   //alignment padding
   PUT(heap_listp, 0);
   // prologue header
-  PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));
+  PUT(heap_listp + (1*WSIZE), PACK(2*DSIZE, 1));
   //prologue footer
-  PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
+  PUT(heap_listp + (2*WSIZE), PACK(2*DSIZE, 1));
   //epilogue header
   PUT(heap_listp + (3*WSIZE), PACK(0, 1));
   heap_listp += (2*WSIZE);
-  
+
 
   //extend empty heap with free block of CHUNKSIZE byes
   if (extend_heap(CHUNKSIZE/WSIZE) == NULL){
@@ -212,7 +219,7 @@ static void *extend_heap(size_t words)
   PUT(HDRP(bp), PACK(size,0));
   //free block footer
   PUT(FTRP(bp), PACK(size,0));
-  //add_to_free_list(heap_listp);
+  add_to_free_list(bp);
 
   //new epilogue header
   PUT(HDRP(NEXT_BLKP(bp)), PACK(0,1));
@@ -229,14 +236,14 @@ static void *extend_heap(size_t words)
 static void *find_fit(size_t asize)
 {
   // first fit search
-  void *cursor;
+  FL_Pointer cursor;
 
   /*printf("PAYLOAD Size: %d", asize);*/
   /*printf("MEMORRY Size: %d", GET_SIZE(HDRP(cursor)));*/
 
-  for (cursor = free_list; NEXT_PTR(cursor) != NULL; cursor = NEXT_PTR(cursor)){
+  for (cursor = free_list; GETPTR(cursor) != NULL; cursor = GETPTR(cursor)){
     if ( (asize <= GET_SIZE(HDRP(cursor)))) {
-        return cursor;
+      return cursor;
     }
   }
   //no fit
@@ -269,6 +276,7 @@ static void *coalesce(void *bp)
   if (prev_alloc && next_alloc) {
     // we need to add free list node here b/c we do not do it in mm_free
     // this should also cover our initial case
+    unlink_node(bp);
     add_to_free_list(bp);
     return bp;
   }
@@ -288,6 +296,7 @@ static void *coalesce(void *bp)
     size += GET_SIZE(HDRP(PREV_BLKP(bp)));
 
     // no need to make new here b/c one exists at prev_node
+    unlink_node(PREV_BLKP(bp));
     add_to_free_list(PREV_BLKP(bp));
 
     PUT(FTRP(bp), PACK(size,0));
@@ -298,11 +307,13 @@ static void *coalesce(void *bp)
   //CASE 4 : both neighbors unallocated
   else {
     size += GET_SIZE(HDRP(PREV_BLKP(bp)))
-          + GET_SIZE(FTRP(NEXT_BLKP(bp)));
- 
+      + GET_SIZE(FTRP(NEXT_BLKP(bp)));
+
     // unlink node that is above us, we can ignore the one below us because that
     // will serve ad the head for this free block
     unlink_node(NEXT_BLKP(bp));
+    unlink_node(PREV_BLKP(bp));
+    add_to_free_list(PREV_BLKP(bp));
 
     PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
     PUT(FTRP(NEXT_BLKP(bp)), PACK(size,0));
@@ -366,14 +377,17 @@ static void place(void *bp, size_t asize)
   size_t csize = GET_SIZE(HDRP(bp));
 
   if ((csize - asize) >= (2*DSIZE)){
+    unlink_node(bp);
     PUT(HDRP(bp), PACK(asize, 1));
     PUT(FTRP(bp), PACK(asize, 1));
     bp = NEXT_BLKP(bp);
     PUT(HDRP(bp), PACK(csize - asize, 0));
     PUT(FTRP(bp), PACK(csize - asize, 0));
+    add_to_free_list(bp);
   }
 
   else{
+    unlink(bp);
     PUT(HDRP(bp), PACK(csize,1));
     PUT(FTRP(bp), PACK(csize,1));
   }
@@ -418,7 +432,7 @@ void mm_checkheap(int verbose)
   }
 
   if ((GET_SIZE(HDRP(heap_listp)) != DSIZE) || !GET_ALLOC(HDRP(heap_listp))) {
-	printf("Bad prologue header\n");
+    printf("Bad prologue header\n");
   }
   checkblock(heap_listp);
 
@@ -453,9 +467,9 @@ static void printblock(void *bp)
   }
 
   printf("%p: header: [%d:%c] footer: [%d:%c]\n",
-	 bp,
-	 (int) hsize, (halloc ? 'a' : 'f'),
-	 (int) fsize, (falloc ? 'a' : 'f'));
+      bp,
+      (int) hsize, (halloc ? 'a' : 'f'),
+      (int) fsize, (falloc ? 'a' : 'f'));
 }
 
 static void checkblock(void *bp)
