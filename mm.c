@@ -101,7 +101,6 @@ static inline int GET_ALLOC( void *p  ) {
 // Given block ptr bp, compute address of its header and footer
 //
 static inline void *HDRP(void *bp) {
-
   return ( (char *)bp) - WSIZE;
 }
 static inline void *FTRP(void *bp) {
@@ -137,7 +136,7 @@ inline void unlink_node(void *bp){
 
   if (free_list == bp){
     free_list = (void*) bp;
-  } else {
+  }else {
     for (cursor = free_list; NEXT_PTR(cursor) != 0 && NEXT_PTR(cursor) != bp; cursor = NEXT_PTR(cursor)){
       while(cursor != 0)
         SET_PTR(cursor, NEXT_PTR(bp));
@@ -183,6 +182,7 @@ int mm_init(void)
   //epilogue header
   PUT(heap_listp + (3*WSIZE), PACK(0, 1));
   heap_listp += (2*WSIZE);
+  
 
   //extend empty heap with free block of CHUNKSIZE byes
   if (extend_heap(CHUNKSIZE/WSIZE) == NULL){
@@ -212,8 +212,8 @@ static void *extend_heap(size_t words)
   PUT(HDRP(bp), PACK(size,0));
   //free block footer
   PUT(FTRP(bp), PACK(size,0));
-  // end of list
-  add_to_free_list(bp);
+  //add_to_free_list(heap_listp);
+
   //new epilogue header
   PUT(HDRP(NEXT_BLKP(bp)), PACK(0,1));
   //Coalesce if previous block was free
@@ -267,12 +267,15 @@ static void *coalesce(void *bp)
 
   //CASE 1 : Both neighbors are allocated
   if (prev_alloc && next_alloc) {
+    // we need to add free list node here b/c we do not do it in mm_free
+    // this should also cover our initial case
     add_to_free_list(bp);
     return bp;
   }
 
   //CASE 2 : Only next free
   else if (prev_alloc && !next_alloc) {
+    // unlink node thats next, b/c our current position will be beggining of new free node
     unlink_node(NEXT_BLKP(bp));
     add_to_free_list(bp);
     size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
@@ -284,6 +287,7 @@ static void *coalesce(void *bp)
   else if (!prev_alloc && next_alloc){
     size += GET_SIZE(HDRP(PREV_BLKP(bp)));
 
+    // no need to make new here b/c one exists at prev_node
     add_to_free_list(PREV_BLKP(bp));
 
     PUT(FTRP(bp), PACK(size,0));
@@ -295,9 +299,10 @@ static void *coalesce(void *bp)
   else {
     size += GET_SIZE(HDRP(PREV_BLKP(bp)))
           + GET_SIZE(FTRP(NEXT_BLKP(bp)));
-
+ 
+    // unlink node that is above us, we can ignore the one below us because that
+    // will serve ad the head for this free block
     unlink_node(NEXT_BLKP(bp));
-    add_to_free_list(PREV_BLKP(bp));
 
     PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
     PUT(FTRP(NEXT_BLKP(bp)), PACK(size,0));
