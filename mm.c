@@ -279,16 +279,13 @@ static void *coalesce(void *bp)
   //CASE 3 : Only prev free
   else if (!prev_alloc && next_alloc){
     size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+
     add_to_free_list(PREV_BLKP(bp));
-    unlink_node(PREV_BLKP(bp));
+
     PUT(FTRP(bp), PACK(size,0));
     PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
     bp = PREV_BLKP(bp);
     void *fp = FREEPTR(bp);
-
-    /*for (cursor = free_list; NEXT_PTR(cursor) != 0 && NEXT_PTR(cursor) != bp; cursor = NEXT_PTR(cursor)){*/
-    
-    //unlink_node(fp);
 
   }
 
@@ -296,6 +293,10 @@ static void *coalesce(void *bp)
   else {
     size += GET_SIZE(HDRP(PREV_BLKP(bp)))
           + GET_SIZE(FTRP(NEXT_BLKP(bp)));
+
+    add_to_free_list(PREV_BLKP(bp));
+    unlink_node(PREV_BLKP(bp));
+
     PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
     PUT(FTRP(NEXT_BLKP(bp)), PACK(size,0));
     bp = PREV_BLKP(bp);
