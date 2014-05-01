@@ -60,6 +60,10 @@ team_t team = {
 #define CHUNKSIZE  (1<<12)  /* initial heap size (bytes) */
 #define OVERHEAD    8       /* overhead of header and footer (bytes) */
 
+#define NEXT_PTR(bp) *((void**) bp)
+#define SET_PTR(bp, val) ((*(void **) bp = val))
+typedef void * FL_Pointer;
+
 static inline int MAX(int x, int y) {
   return x > y ? x : y;
 }
@@ -101,9 +105,11 @@ static inline void *HDRP(void *bp) {
   return ( (char *)bp) - WSIZE;
 }
 static inline void *FTRP(void *bp) {
-  return ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE);
+  return ((char *)(bp) + GET_SIZE(HDRP(bp)) - 2*WSIZE);
 }
-
+static inline void *FREEPTR(void *bp) {
+  return ((char *)(bp) + GET_SIZE(HDRP(bp)) - WSIZE);
+}
 //
 // Given block ptr bp, compute address of next and previous blocks
 //
@@ -114,6 +120,31 @@ static inline void *NEXT_BLKP(void *bp) {
 static inline void* PREV_BLKP(void *bp){
   return  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)));
 }
+
+//
+// This will add a node to the free list
+//
+FL_Pointer free_list = NULL;
+
+static inline void add_to_free_list(void *bp) {
+  FL_Pointer *payload = (FL_Pointer *) bp;
+  *payload = free_list;
+  free_list = bp;
+}
+
+inline void unlink_node(void *bp){
+  void *cursor = free_list;
+
+  if (free_list == bp){
+    free_list = (void*) bp;
+  } else {
+    for (cursor = free_list; NEXT_PTR(cursor) != 0 && NEXT_PTR(cursor) != bp; cursor = NEXT_PTR(cursor)){
+      while(cursor != 0)
+        SET_PTR(cursor, NEXT_PTR(bp));
+    }
+  }
+}
+
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -181,8 +212,12 @@ static void *extend_heap(size_t words)
   PUT(HDRP(bp), PACK(size,0));
   //free block footer
   PUT(FTRP(bp), PACK(size,0));
+  // end of list
+  add_to_free_list(bp);
+  add_to_free_list(HDRP(NEXT_BLKP(bp)) + WSIZE);
   //new epilogue header
   PUT(HDRP(NEXT_BLKP(bp)), PACK(0,1));
+
 
   //Coalesce if previous block was free
   return coalesce(bp);
@@ -230,19 +265,20 @@ static void *coalesce(void *bp)
   size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
   size_t size = GET_SIZE(HDRP(bp));
 
-  //CASE 1 : Neither neighbor is unallocated
+  //CASE 1 : Both neighbors are allocated
   if (prev_alloc && next_alloc) {
     return bp;
   }
 
-  //CASE 2 : Only next unallocated
+  //CASE 2 : Only next free
   else if (prev_alloc && !next_alloc) {
     size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
     PUT(HDRP(bp), PACK(size,0));
     PUT(FTRP(bp), PACK(size,0));
+    /*unlink_node(*bp);*/
   }
 
-  //CASE 3 : Only prev unallocated
+  //CASE 3 : Only prev free
   else if (!prev_alloc && next_alloc){
     size += GET_SIZE(HDRP(PREV_BLKP(bp)));
     PUT(FTRP(bp), PACK(size,0));
