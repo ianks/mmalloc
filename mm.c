@@ -60,6 +60,10 @@ team_t team = {
 #define CHUNKSIZE  (1<<12)  /* initial heap size (bytes) */
 #define OVERHEAD    8       /* overhead of header and footer (bytes) */
 
+#define NEXT_PTR(bp) *((void**) bp)
+#define SET_PTR(bp, val) ((*(void **) bp) = val)
+typedef void * FL_Pointer;
+
 static inline int MAX(int x, int y) {
   return x > y ? x : y;
 }
@@ -97,13 +101,14 @@ static inline int GET_ALLOC( void *p  ) {
 // Given block ptr bp, compute address of its header and footer
 //
 static inline void *HDRP(void *bp) {
-
   return ( (char *)bp) - WSIZE;
 }
 static inline void *FTRP(void *bp) {
-  return ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE);
+  return ((char *)(bp) + GET_SIZE(HDRP(bp)) - 2*WSIZE);
 }
-
+static inline void *FREEPTR(void *bp) {
+  return ((char *)(bp) + GET_SIZE(HDRP(bp)) - WSIZE);
+}
 //
 // Given block ptr bp, compute address of next and previous blocks
 //
@@ -114,6 +119,31 @@ static inline void *NEXT_BLKP(void *bp) {
 static inline void* PREV_BLKP(void *bp){
   return  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)));
 }
+
+//
+// This will add a node to the free list
+//
+FL_Pointer free_list = NULL;
+
+static inline void add_to_free_list(void *bp) {
+  FL_Pointer *payload = (FL_Pointer *) bp;
+  *payload = free_list;
+  free_list = bp;
+}
+
+inline void unlink_node(void *bp){
+  void *cursor;
+
+  if (free_list == bp){
+    free_list = (void*) bp;
+  }else {
+    for (cursor = free_list; NEXT_PTR(cursor) != 0 && NEXT_PTR(cursor) != bp; cursor = NEXT_PTR(cursor)){
+      while(cursor != 0)
+        SET_PTR(cursor, NEXT_PTR(bp));
+    }
+  }
+}
+
 
 /////////////////////////////////////////////////////////////////////////////
 //
@@ -175,12 +205,8 @@ int mm_init(void)
   PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
   //epilogue header
   PUT(heap_listp + (3*WSIZE), PACK(0, 1));
-  // CLNode
-  PUT(heap_listp + (4*WSIZE), &new_node);
-  CL_append(free_ptr, &new_node);
-
-  heap_listp += (4*WSIZE);
-
+  heap_listp += (2*WSIZE);
+  
   //extend empty heap with free block of CHUNKSIZE byes
   if (extend_heap(CHUNKSIZE/WSIZE) == NULL){
     return -1;
@@ -214,13 +240,10 @@ static void *extend_heap(size_t words)
   //free block footer
 
   PUT(FTRP(bp), PACK(size,0));
+  //add_to_free_list(heap_listp);
+
   //new epilogue header
   PUT(HDRP(NEXT_BLKP(bp)), PACK(0,1));
-
-  PUT(HDRP(bp)+WSIZE, &new_node);
-  CL_append(free_ptr, &new_node);
-
-
   //Coalesce if previous block was free
   return coalesce(bp);
 }
@@ -234,10 +257,14 @@ static void *extend_heap(size_t words)
 static void *find_fit(size_t asize)
 {
   // first fit search
+  void *cursor;
 
-  for (cursor = free_ptr; GET_SIZE(HDRP(cursor - WSIZE)) > 0; cursor = cursor->next){
-    if ( !GET_ALLOC(HDRP(cursor - WSIZE)) && (asize <= GET_SIZE(HDRP(cursor - WSIZE)))) {
-        return cursor - WSIZE;
+  /*printf("PAYLOAD Size: %d", asize);*/
+  /*printf("MEMORRY Size: %d", GET_SIZE(HDRP(cursor)));*/
+
+  for (cursor = free_list; NEXT_PTR(cursor) != NULL; cursor = NEXT_PTR(cursor)){
+    if ( (asize <= GET_SIZE(HDRP(cursor)))) {
+        return cursor;
     }
   }
   //no fit
@@ -269,21 +296,31 @@ static void *coalesce(void *bp)
   size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
   size_t size = GET_SIZE(HDRP(bp));
 
-  //CASE 1 : Neither neighbor is unallocated
+  //CASE 1 : Both neighbors are allocated
   if (prev_alloc && next_alloc) {
+    // we need to add free list node here b/c we do not do it in mm_free
+    // this should also cover our initial case
+    add_to_free_list(bp);
     return bp;
   }
 
-  //CASE 2 : Only next unallocated
+  //CASE 2 : Only next free
   else if (prev_alloc && !next_alloc) {
+    // unlink node thats next, b/c our current position will be beggining of new free node
+    unlink_node(NEXT_BLKP(bp));
+    add_to_free_list(bp);
     size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
     PUT(HDRP(bp), PACK(size,0));
     PUT(FTRP(bp), PACK(size,0));
   }
 
-  //CASE 3 : Only prev unallocated
+  //CASE 3 : Only prev free
   else if (!prev_alloc && next_alloc){
     size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+
+    // no need to make new here b/c one exists at prev_node
+    add_to_free_list(PREV_BLKP(bp));
+
     PUT(FTRP(bp), PACK(size,0));
     PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
     bp = PREV_BLKP(bp);
@@ -293,6 +330,11 @@ static void *coalesce(void *bp)
   else {
     size += GET_SIZE(HDRP(PREV_BLKP(bp)))
           + GET_SIZE(FTRP(NEXT_BLKP(bp)));
+ 
+    // unlink node that is above us, we can ignore the one below us because that
+    // will serve ad the head for this free block
+    unlink_node(NEXT_BLKP(bp));
+
     PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
     PUT(FTRP(NEXT_BLKP(bp)), PACK(size,0));
     bp = PREV_BLKP(bp);
