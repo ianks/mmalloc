@@ -4,17 +4,13 @@
 TEAM = xyzzy
 VERSION = 1
 
-CC = gcc -g
-CFLAGS = -g -Wall -O2 -m32
+CC = gcc
+CFLAGS = -Wall -O3 -m32
 
 OBJS = mdriver.o mm.o memlib.o fsecs.o fcyc.o clock.o ftimer.o
-DBUG = mm.o memlib.o
 
 mdriver: $(OBJS)
 	$(CC) $(CFLAGS) -o mdriver $(OBJS)
-
-debug: $(DBUG) 
-	$(CC) $(CFLAGS) -o debug $(DBUG)
 
 test: test
 	./mdriver -V -t traces
@@ -26,7 +22,6 @@ fsecs.o: fsecs.c fsecs.h config.h
 fcyc.o: fcyc.c fcyc.h
 ftimer.o: ftimer.c ftimer.h config.h
 clock.o: clock.c clock.h
-debug.o: debug.c
 
 clean:
 	rm -f *~ *.o mdriver
