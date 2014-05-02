@@ -69,6 +69,7 @@ typedef void * FL_Pointer;
 typedef int bool;
 #define true  (1)
 #define false (0)
+
 static inline int MAX(int x, int y) {
   return x > y ? x : y;
 }
@@ -129,7 +130,7 @@ static inline void* PREV_BLKP(void *bp){
 // This will add a node to the free list
 //
 FL_Pointer free_list = NULL;
-bool is_on_free_list(void* bp); // decl
+static inline bool is_on_free_list(void* bp); // decl
 
 void print_list(void *bp) {
   FL_Pointer cursor;
@@ -143,14 +144,16 @@ void print_list(void *bp) {
 }
 
 static inline void add_to_free_list(void *bp) {
-  assert( !is_on_free_list(bp) );
-  assert( bp != free_list);
+  //assert( ! is_on_free_list(bp) );
+  if ( free_list == bp )
+    return;
+  // assert( bp != free_list);
   SET_PTR(bp, free_list);
   free_list = bp;
 }
 
-inline void unlink_node(void *bp){
-  assert( is_on_free_list(bp) );
+static inline void unlink_node(void *bp){
+  // assert( is_on_free_list(bp) );
 
   if (free_list == bp){
     //unlink first thing on list
@@ -158,8 +161,8 @@ inline void unlink_node(void *bp){
   }else {
     //unlink
     FL_Pointer cursor;
-    for (cursor = free_list; GETPTR(cursor) != NULL && GETPTR(cursor) != bp; cursor = GETPTR(cursor)); 
-      assert( GETPTR(cursor) == bp);
+    for (cursor = free_list; GETPTR(cursor) != NULL && GETPTR(cursor) != bp; cursor = GETPTR(cursor));
+      // assert( GETPTR(cursor) == bp);
       SET_PTR(cursor, GETPTR(bp));
     }
   }
@@ -182,7 +185,7 @@ static void *coalesce(void *bp);
 static void printblock(void *bp);
 static void checkblock(void *bp);
 
-bool is_on_free_list(void* bp){
+static inline bool is_on_free_list(void* bp){
   FL_Pointer cursor;
   for (cursor = free_list; cursor != NULL; cursor = GETPTR(cursor)) {
     if( cursor  == bp )
@@ -264,12 +267,10 @@ static void *find_fit(size_t asize)
 
   for (cursor = free_list; cursor != NULL; cursor = GETPTR(cursor)){
     if ( (asize <= GET_SIZE(HDRP(cursor)))) {
-      printf("find_fit returns %p\n", cursor);
       return cursor;
     }
   }
-  //no fit
-  printf("NO FIT\n");
+
   return NULL;
 }
 
@@ -278,7 +279,7 @@ static void *find_fit(size_t asize)
 //
 void mm_free(void *bp)
 {
-  assert( ! is_on_free_list(bp) );
+  //assert( ! is_on_free_list(bp) );
 
   size_t size = GET_SIZE(HDRP(bp));
 
@@ -293,11 +294,11 @@ void mm_free(void *bp)
 //
 static void *coalesce(void *bp)
 {
-  
+
   size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
   size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
   size_t size = GET_SIZE(HDRP(bp));
-  
+
   //assert( ! is_on_free_list(bp) );
 
 
@@ -311,8 +312,8 @@ static void *coalesce(void *bp)
   else if (prev_alloc && !next_alloc) {
     // unlink node thats next, b/c our current position will be beggining of new free node
 
-    add_to_free_list(bp);
     unlink_node(NEXT_BLKP(bp));
+    add_to_free_list(bp);
 
     size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
     PUT(HDRP(bp), PACK(size,0));
@@ -342,6 +343,7 @@ static void *coalesce(void *bp)
     PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
     PUT(FTRP(NEXT_BLKP(bp)), PACK(size,0));
     bp = PREV_BLKP(bp);
+
   }
 
   //assert( is_on_free_list(bp) );
@@ -389,10 +391,9 @@ void *mm_malloc(size_t size)
     return NULL;
   }
 
-  assert( is_on_free_list(bp) );
+  // assert( is_on_free_list(bp) );
   place(bp, asize);
-  printf("malloc finishes with return %p.............\n", bp);
-  assert( ! is_on_free_list(bp) );
+  // assert( ! is_on_free_list(bp) );
   return bp;
 
 }
