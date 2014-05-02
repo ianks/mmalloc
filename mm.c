@@ -29,6 +29,7 @@
 #include <memory.h>
 #include "mm.h"
 #include "memlib.h"
+#include "assert.h"
 
 /*********************************************************
  * NOTE TO STUDENTS: Before you do anything else, please
@@ -65,6 +66,9 @@ typedef void * FL_Pointer;
 #define SET_PTR(bp, val) ((*(FL_Pointer*)(bp)) = (val) )
 #define GETPTR(x) ( *(FL_Pointer *) (x) )
 
+typedef int bool;
+#define true  (1)
+#define false (0)
 static inline int MAX(int x, int y) {
   return x > y ? x : y;
 }
@@ -125,13 +129,28 @@ static inline void* PREV_BLKP(void *bp){
 // This will add a node to the free list
 //
 FL_Pointer free_list = NULL;
+bool is_on_free_list(void* bp); // decl
+
+void print_list(void *bp) {
+  FL_Pointer cursor;
+  char *sep = "";
+  printf("FL : ");
+  for (cursor = free_list; cursor != NULL; cursor = GETPTR(cursor)) {
+    printf("%p %s", cursor, sep);
+      sep = " -> ";
+  }
+  printf("\n");
+}
 
 static inline void add_to_free_list(void *bp) {
+  assert( !is_on_free_list(bp) );
+  assert( bp != free_list);
   SET_PTR(bp, free_list);
   free_list = bp;
 }
 
 inline void unlink_node(void *bp){
+  assert( is_on_free_list(bp) );
 
   if (free_list == bp){
     //unlink first thing on list
@@ -140,16 +159,10 @@ inline void unlink_node(void *bp){
     //unlink
     FL_Pointer cursor;
     for (cursor = free_list; GETPTR(cursor) != NULL && GETPTR(cursor) != bp; cursor = GETPTR(cursor)); 
-    if( cursor == NULL )
-    {
-      printf("Item not in list");
-    }
-    else{
-      //assert( GETPTR(cursor) == bp);
+      assert( GETPTR(cursor) == bp);
       SET_PTR(cursor, GETPTR(bp));
     }
   }
-}
 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -169,6 +182,17 @@ static void *coalesce(void *bp);
 static void printblock(void *bp);
 static void checkblock(void *bp);
 
+bool is_on_free_list(void* bp){
+  FL_Pointer cursor;
+  for (cursor = free_list; cursor != NULL; cursor = GETPTR(cursor)) {
+    if( cursor  == bp )
+    {
+      return true;
+    }
+  }
+  return false;
+}
+
 //
 // mm_init - Initialize the memory manager
 //
@@ -183,9 +207,9 @@ int mm_init(void)
   //alignment padding
   PUT(heap_listp, 0);
   // prologue header
-  PUT(heap_listp + (1*WSIZE), PACK(2*DSIZE, 1));
+  PUT(heap_listp + (1*WSIZE), PACK(DSIZE, 1));
   //prologue footer
-  PUT(heap_listp + (2*WSIZE), PACK(2*DSIZE, 1));
+  PUT(heap_listp + (2*WSIZE), PACK(DSIZE, 1));
   //epilogue header
   PUT(heap_listp + (3*WSIZE), PACK(0, 1));
   heap_listp += (2*WSIZE);
@@ -219,8 +243,6 @@ static void *extend_heap(size_t words)
   PUT(HDRP(bp), PACK(size,0));
   //free block footer
   PUT(FTRP(bp), PACK(size,0));
-  add_to_free_list(bp);
-
   //new epilogue header
   PUT(HDRP(NEXT_BLKP(bp)), PACK(0,1));
   //Coalesce if previous block was free
@@ -238,15 +260,16 @@ static void *find_fit(size_t asize)
   // first fit search
   FL_Pointer cursor;
 
-  /*printf("PAYLOAD Size: %d", asize);*/
-  /*printf("MEMORRY Size: %d", GET_SIZE(HDRP(cursor)));*/
+  /*printf("MEMORRY Size: %d\n", GET_SIZE(HDRP(cursor)));*/
 
-  for (cursor = free_list; GETPTR(cursor) != NULL; cursor = GETPTR(cursor)){
+  for (cursor = free_list; cursor != NULL; cursor = GETPTR(cursor)){
     if ( (asize <= GET_SIZE(HDRP(cursor)))) {
+      printf("find_fit returns %p\n", cursor);
       return cursor;
     }
   }
   //no fit
+  printf("NO FIT\n");
   return NULL;
 }
 
@@ -255,12 +278,14 @@ static void *find_fit(size_t asize)
 //
 void mm_free(void *bp)
 {
+  assert( ! is_on_free_list(bp) );
 
   size_t size = GET_SIZE(HDRP(bp));
 
   PUT(HDRP(bp), PACK(size,0));
   PUT(FTRP(bp), PACK(size,0));
   coalesce(bp);
+  //assert( is_on_free_list(bp) );
 }
 
 //
@@ -268,24 +293,27 @@ void mm_free(void *bp)
 //
 static void *coalesce(void *bp)
 {
+  
   size_t prev_alloc = GET_ALLOC(FTRP(PREV_BLKP(bp)));
   size_t next_alloc = GET_ALLOC(HDRP(NEXT_BLKP(bp)));
   size_t size = GET_SIZE(HDRP(bp));
+  
+  //assert( ! is_on_free_list(bp) );
+
 
   //CASE 1 : Both neighbors are allocated
   if (prev_alloc && next_alloc) {
     // we need to add free list node here b/c we do not do it in mm_free
-    // this should also cover our initial case
-    unlink_node(bp);
     add_to_free_list(bp);
-    return bp;
   }
 
   //CASE 2 : Only next free
   else if (prev_alloc && !next_alloc) {
     // unlink node thats next, b/c our current position will be beggining of new free node
-    unlink_node(NEXT_BLKP(bp));
+
     add_to_free_list(bp);
+    unlink_node(NEXT_BLKP(bp));
+
     size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
     PUT(HDRP(bp), PACK(size,0));
     PUT(FTRP(bp), PACK(size,0));
@@ -296,8 +324,6 @@ static void *coalesce(void *bp)
     size += GET_SIZE(HDRP(PREV_BLKP(bp)));
 
     // no need to make new here b/c one exists at prev_node
-    unlink_node(PREV_BLKP(bp));
-    add_to_free_list(PREV_BLKP(bp));
 
     PUT(FTRP(bp), PACK(size,0));
     PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
@@ -311,14 +337,14 @@ static void *coalesce(void *bp)
 
     // unlink node that is above us, we can ignore the one below us because that
     // will serve ad the head for this free block
-    unlink_node(NEXT_BLKP(bp));
-    unlink_node(PREV_BLKP(bp));
-    add_to_free_list(PREV_BLKP(bp));
 
+    unlink_node(NEXT_BLKP(bp));
     PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
     PUT(FTRP(NEXT_BLKP(bp)), PACK(size,0));
     bp = PREV_BLKP(bp);
   }
+
+  //assert( is_on_free_list(bp) );
 
   return bp;
 }
@@ -333,6 +359,7 @@ void *mm_malloc(size_t size)
   //ammount to extend heap if the new block doesnt fit
   size_t extendsize;
   char *bp;
+
 
   //ignore spurious requests
   if (size == 0){
@@ -350,7 +377,9 @@ void *mm_malloc(size_t size)
 
   //search the free list for a fit
   if ((bp = find_fit(asize)) != NULL){
+//    assert( is_on_free_list(bp) );
     place(bp, asize);
+//    assert( ! is_on_free_list(bp) );
     return bp;
   }
 
@@ -360,7 +389,10 @@ void *mm_malloc(size_t size)
     return NULL;
   }
 
+  assert( is_on_free_list(bp) );
   place(bp, asize);
+  printf("malloc finishes with return %p.............\n", bp);
+  assert( ! is_on_free_list(bp) );
   return bp;
 
 }
@@ -375,6 +407,7 @@ void *mm_malloc(size_t size)
 static void place(void *bp, size_t asize)
 {
   size_t csize = GET_SIZE(HDRP(bp));
+  assert( is_on_free_list(bp) );
 
   if ((csize - asize) >= (2*DSIZE)){
     unlink_node(bp);
@@ -387,7 +420,7 @@ static void place(void *bp, size_t asize)
   }
 
   else{
-    unlink(bp);
+    unlink_node(bp);
     PUT(HDRP(bp), PACK(csize,1));
     PUT(FTRP(bp), PACK(csize,1));
   }

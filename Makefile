@@ -4,7 +4,7 @@
 TEAM = xyzzy
 VERSION = 1
 
-CC = gcc
+CC = gcc -g
 CFLAGS = -g -Wall -O2 -m32
 
 OBJS = mdriver.o mm.o memlib.o fsecs.o fcyc.o clock.o ftimer.o
