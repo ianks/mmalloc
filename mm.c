@@ -19,6 +19,33 @@ team_t team = {
   ""
 };
 
+
+/////////////////////////////////////////////////////////////////////////////
+// Constants and macros
+//
+// These correspond to the material in Figure 9.43 of the text
+// The macros have been turned into C++ inline functions to
+// make debugging code easier.
+//
+/////////////////////////////////////////////////////////////////////////////
+
+#define WSIZE       sizeof(int*)       /* word size (bytes) */
+#define DSIZE       sizeof(double)       /* doubleword size (bytes) */
+#define CHUNKSIZE  (1<<12)  /* initial heap size (bytes) */
+#define OVERHEAD    8       /* overhead of header and footer (bytes) */
+
+#define NEXT_PTR(bp) *((void**) bp)
+#define SET_PTR(bp, val) ((*(FL_Pointer*)(bp)) = (val) )
+#define GETPTR(x) ( *(FL_Pointer *) (x) )
+
+typedef int bool;
+#define true  (1)
+#define false (0)
+
+static char *heap_listp;  /* pointer to first block */
+typedef struct CLNode * FL_Pointer;
+
+
 struct CLNode {
   struct CLNode *next;
   struct CLNode *prev;
@@ -29,7 +56,7 @@ struct CLNode {
 // This has the next & prev pointing to the
 // root itself.
 //
-void CL_init(struct CLNode *root)
+void CL_init(FL_Pointer root)
 {
   root -> next = root;
   root -> prev = root;
@@ -39,7 +66,7 @@ void CL_init(struct CLNode *root)
 // Add something after "after" in the list. Usually,
 // "after" will be the freelist struct
 //
-void CL_append(struct CLNode *after, struct CLNode *newguy)
+void CL_append(FL_Pointer after, FL_Pointer newguy)
 {
   newguy -> next = after -> next;
   newguy -> prev = after;
@@ -79,28 +106,6 @@ void CL_print(struct CLNode *root)
   printf(" #%d nodes\n", count);
 }
 
-
-/////////////////////////////////////////////////////////////////////////////
-// Constants and macros
-//
-// These correspond to the material in Figure 9.43 of the text
-// The macros have been turned into C++ inline functions to
-// make debugging code easier.
-//
-/////////////////////////////////////////////////////////////////////////////
-
-#define WSIZE       sizeof(int*)       /* word size (bytes) */
-#define DSIZE       sizeof(double)       /* doubleword size (bytes) */
-#define CHUNKSIZE  (1<<12)  /* initial heap size (bytes) */
-#define OVERHEAD    8       /* overhead of header and footer (bytes) */
-
-#define NEXT_PTR(bp) *((void**) bp)
-#define SET_PTR(bp, val) ((*(FL_Pointer*)(bp)) = (val) )
-#define GETPTR(x) ( *(FL_Pointer *) (x) )
-
-typedef int bool;
-#define true  (1)
-#define false (0)
 
 static inline int MAX(int x, int y) {
   return x > y ? x : y;
@@ -162,8 +167,7 @@ static inline void* PREV_BLKP(void *bp){
 // Global Variables
 //
 
-static char *heap_listp;  /* pointer to first block */
-typedef struct CLNode * FL_Pointer;
+
 struct CLNode free_list;
 
 //
