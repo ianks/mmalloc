@@ -29,12 +29,12 @@ team_t team = {
 //
 /////////////////////////////////////////////////////////////////////////////
 
-#define WSIZE       sizeof(int*)       /* word size (bytes) */
-#define DSIZE       sizeof(double)       /* doubleword size (bytes) */
+#define WSIZE       (sizeof(int*))       /* word size (bytes) */
+#define DSIZE       (sizeof(double))       /* doubleword size (bytes) */
 #define CHUNKSIZE  (1<<12)  /* initial heap size (bytes) */
-#define OVERHEAD    8       /* overhead of header and footer (bytes) */
+#define OVERHEAD    16       
 
-#define NEXT_PTR(bp) *((void**) bp)
+#define right_PTR(bp) *((void**) bp)
 #define SET_PTR(bp, val) ((*(FL_Pointer*)(bp)) = (val) )
 #define GETPTR(x) ( *(FL_Pointer *) (x) )
 
@@ -47,19 +47,21 @@ typedef struct CLNode * FL_Pointer;
 
 
 struct CLNode {
-  struct CLNode *next;
-  struct CLNode *prev;
+  struct CLNode *parent;
+  struct CLNode *right;
+  struct CLNode *left;
 };
 
 //
 // Initialize the root of a circular list.
-// This has the next & prev pointing to the
+// This has the right & left pointing to the
 // root itself.
 //
 void CL_init(FL_Pointer root)
 {
-  root -> next = root;
-  root -> prev = root;
+  root -> right = root;
+  root -> left = root;
+  root -> parent = NULL;
 }
 
 //
@@ -68,11 +70,13 @@ void CL_init(FL_Pointer root)
 //
 void CL_append(FL_Pointer after, FL_Pointer newguy)
 {
-  newguy -> next = after -> next;
-  newguy -> prev = after;
-  after -> next = newguy;
-  newguy -> next -> prev = newguy;
+  newguy -> right = after -> right;
+  newguy -> left = after;
+  after -> right = newguy;
+  newguy -> right -> left = newguy;
 }
+
+
 
 //
 // Unlink the element at "ptr". Ptr should NEVER be the
@@ -81,10 +85,10 @@ void CL_append(FL_Pointer after, FL_Pointer newguy)
 //
 void CL_unlink(struct CLNode *ptr)
 {
-  ptr -> prev -> next = ptr -> next;
-  ptr -> next -> prev = ptr -> prev;
-  ptr -> next = NULL; // be tidy
-  ptr -> prev = NULL; // be tidy
+  ptr -> left -> right = ptr -> right;
+  ptr -> right -> left = ptr -> left;
+  ptr -> right = NULL; // be tidy
+  ptr -> left = NULL; // be tidy
 }
 
 void CL_print(struct CLNode *root)
@@ -95,10 +99,10 @@ void CL_print(struct CLNode *root)
 
   printf("FreeList @ %p: ", root);
   //
-  // Note the iteration pattern --- you start with the "next"
+  // Note the iteration pattern --- you start with the "right"
   // after the root, and then end when you're back at the root.
   //
-  for ( ptr = root -> next; ptr != root; ptr = ptr -> next) {
+  for ( ptr = root -> right; ptr != root; ptr = ptr -> right) {
       count++;
       printf("%s%p", sep, ptr);
       sep = ", ";
@@ -151,13 +155,13 @@ static inline void *FTRP(void *bp) {
   return ((char *)(bp) + GET_SIZE(HDRP(bp)) - DSIZE);
 }
 //
-// Given block ptr bp, compute address of next and previous blocks
+// Given block ptr bp, compute address of right and leftious blocks
 //
-static inline void *NEXT_BLKP(void *bp) {
+static inline void *right_BLKP(void *bp) {
   return  ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)));
 }
 
-static inline void* PREV_BLKP(void *bp){
+static inline void* left_BLKP(void *bp){
   return  ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)));
 }
 
@@ -179,6 +183,97 @@ static void *find_fit(size_t asize);
 static void *coalesce(void *bp);
 static void printblock(void *bp);
 static void checkblock(void *bp);
+
+void bst_insert(FL_Pointer bp){
+
+  FL_Pointer cursor = &free_list;
+
+  if( bp == &free_list)
+    return;
+
+
+  if (GET_SIZE(cursor) >= GET_SIZE(bp)){
+    if (cursor->left == NULL){
+      cursor->left = bp;
+      bp->parent = cursor;
+      return;
+    }
+    else
+      return bst_insert(cursor->left);
+  }
+  else{
+    if (cursor->right == NULL){
+      cursor->right = bp;
+      bp->parent = cursor;
+      return;
+    }
+    else
+      return bst_insert(cursor->right);
+  }
+}
+
+static inline void bst_remove(FL_Pointer bp){
+  //no kidz
+  if (bp->right == NULL && bp->left == NULL)
+    bp->parent = NULL;
+
+  //one child case 1
+  else if (bp->parent != NULL && bp->right != NULL && bp->left == NULL){
+    bp->parent->right = bp->right;
+    bp->right->parent = bp->parent;
+    bp = NULL;
+  }
+  //one child case 2
+  else if (bp->parent != NULL && bp->right == NULL && bp->left != NULL){
+    bp->parent->left = bp->left;
+    bp->left->parent = bp->parent;
+    bp = NULL;
+  }
+  //two childrenz
+  else{
+
+    FL_Pointer tmp;
+    // find smallest value in right subtree, goodbye it
+    for (tmp = bp->right; tmp != NULL; tmp = tmp->left){
+      if (tmp->left == NULL){
+        bp = tmp;
+        tmp = NULL;
+      }
+    }
+  }
+}
+  
+void *bst_find_fit(size_t asize){
+  FL_Pointer cursor = &free_list;
+
+  while(true){
+    if (GET_SIZE(HDRP(cursor)) >= asize){
+      if (cursor->left == NULL)
+        return cursor;
+      else
+        cursor = cursor->left;
+    }
+    else{
+      if (cursor->right == NULL)
+        return cursor;
+      else
+        cursor = cursor->left;
+    }
+  }
+}
+static void *find_fit(size_t asize)
+{
+  FL_Pointer ptr;
+  for (ptr = free_list.right; ptr != &free_list; ptr = ptr->right){
+    if ( (asize <= GET_SIZE(HDRP(ptr)))) {
+      return ptr;
+    }
+  }
+
+  return NULL;
+}
+
+
 
 //
 // mm_init - Initialize the memory manager
@@ -230,8 +325,8 @@ static void *extend_heap(size_t words)
   //free block footer
   PUT(FTRP(bp), PACK(size,0));
   //new epilogue header
-  PUT(HDRP(NEXT_BLKP(bp)), PACK(0,1));
-  //Coalesce if previous block was free
+  PUT(HDRP(right_BLKP(bp)), PACK(0,1));
+  //Coalesce if leftious block was free
 
   return coalesce(bp);
 }
@@ -242,17 +337,7 @@ static void *extend_heap(size_t words)
 //
 // find_fit - Find a fit for a block with asize bytes
 //
-static void *find_fit(size_t asize)
-{
-  FL_Pointer ptr;
-  for (ptr = free_list.next; ptr != &free_list; ptr = ptr->next){
-    if ( (asize <= GET_SIZE(HDRP(ptr)))) {
-      return ptr;
-    }
-  }
 
-  return NULL;
-}
 
 //
 // mm_free - Free a block
@@ -274,52 +359,56 @@ void mm_free(void *bp)
 //
 static void *coalesce(void *bp)
 {
-  FL_Pointer prev = PREV_BLKP(bp);
-  FL_Pointer next = NEXT_BLKP(bp);
+  FL_Pointer left = left_BLKP(bp);
+  FL_Pointer right = right_BLKP(bp);
 
-  size_t prev_alloc = GET_ALLOC(FTRP(prev));
-  size_t next_alloc = GET_ALLOC(HDRP(next));
+  size_t left_alloc = GET_ALLOC(FTRP(left));
+  size_t right_alloc = GET_ALLOC(HDRP(right));
   size_t size = GET_SIZE(HDRP(bp));
 
   //CASE 1 : Both neighbors are allocated
-  if (prev_alloc && next_alloc) {
+  if (left_alloc && right_alloc) {
     // we need to add free list node here b/c we do not do it in mm_free
-    CL_append(&free_list, bp);
+    //CL_append(&free_list, bp);
+    bst_insert(bp);
   }
 
-  //CASE 2 : Only next free
-  else if (prev_alloc && !next_alloc) {
+  //CASE 2 : Only right free
+  else if (left_alloc && !right_alloc) {
 
-    // unlink node thats next, b/c our current position will be beggining of new free node
-    CL_unlink(next);
-    CL_append(&free_list, bp);
+    // unlink node thats right, b/c our current position will be beggining of new free node
+    //CL_unlink(right);
+    //CL_append(&free_list, bp);
+    bst_remove(right);
+    bst_insert(bp);
 
-    size += GET_SIZE(HDRP(next));
+    size += GET_SIZE(HDRP(right));
     PUT(HDRP(bp), PACK(size,0));
     PUT(FTRP(bp), PACK(size,0));
   }
 
-  //CASE 3 : Only prev free
-  else if (!prev_alloc && next_alloc){
-    size += GET_SIZE(HDRP(prev));
+  //CASE 3 : Only left free
+  else if (!left_alloc && right_alloc){
+    size += GET_SIZE(HDRP(left));
 
-    // no need to make new here b/c one exists at prev_node
+    // no need to make new here b/c one exists at left_node
     PUT(FTRP(bp), PACK(size,0));
-    PUT(HDRP(prev), PACK(size,0));
-    bp = prev;
+    PUT(HDRP(left), PACK(size,0));
+    bp = left;
   }
 
   //CASE 4 : both neighbors unallocated
   else {
-    size += GET_SIZE(HDRP(prev))
-      + GET_SIZE(FTRP(next));
+    size += GET_SIZE(HDRP(left))
+      + GET_SIZE(FTRP(right));
 
     // unlink node that is above us, we can ignore the one below us because that
     // will serve ad the head for this free block
-    CL_unlink(next);
-    PUT(HDRP(prev), PACK(size,0));
-    PUT(FTRP(next), PACK(size,0));
-    bp = prev;
+    //CL_unlink(right);
+    bst_remove(right);
+    PUT(HDRP(left), PACK(size,0));
+    PUT(FTRP(right), PACK(size,0));
+    bp = left;
 
   }
 
@@ -353,7 +442,7 @@ void *mm_malloc(size_t size)
   }
 
   //search the free list for a fit
-  if ((bp = find_fit(asize)) != NULL){
+  if ((bp = bst_find_fit(asize)) != NULL){
 //    assert( is_on_free_list(bp) );
     place(bp, asize);
 //    assert( ! is_on_free_list(bp) );
@@ -378,18 +467,21 @@ static void place(void *bp, size_t asize)
   size_t csize = GET_SIZE(HDRP(bp));
 
 
-  if ((csize - asize) >= (2*DSIZE)){
-    CL_unlink(bp);
+  if ((csize - asize) >= (3*DSIZE)){
+    //CL_unlink(bp);
+    bst_remove(bp);
     PUT(HDRP(bp), PACK(asize, 1));
     PUT(FTRP(bp), PACK(asize, 1));
-    bp = NEXT_BLKP(bp);
+    bp = right_BLKP(bp);
     PUT(HDRP(bp), PACK(csize - asize, 0));
     PUT(FTRP(bp), PACK(csize - asize, 0));
-    CL_append(&free_list, bp);
+    //CL_append(&free_list, bp);
+    bst_insert(bp);
   }
 
   else{
-    CL_unlink(bp);
+    //CL_unlink(bp);
+    bst_remove(bp);
     PUT(HDRP(bp), PACK(csize,1));
     PUT(FTRP(bp), PACK(csize,1));
   }
@@ -435,7 +527,7 @@ void mm_checkheap(int verbose)
   }
   checkblock(heap_listp);
 
-  for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)) {
+  for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = right_BLKP(bp)) {
     if (verbose)  {
       printblock(bp);
     }
